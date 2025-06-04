@@ -10,6 +10,42 @@ let isDrawing = false; // 是否正在畫軌跡
 let trailColor; // 軌跡顏色
 let trails = []; // 用於儲存所有的軌跡
 
+// 字母練習相關
+let letters = ['T', 'K', 'U', 'E', 'T'];
+let currentLetterIndex = 0;
+// 每個字母的第一筆畫起點（以畫布比例設定，方便自適應）
+const letterStartPoints = {
+  'T': { x: 0.5, y: 0.28 },
+  'K': { x: 0.42, y: 0.22 },
+  'U': { x: 0.42, y: 0.22 },
+  'E': { x: 0.42, y: 0.22 }
+};
+
+// 畫半透明大字母
+function drawLetter(letter) {
+  push();
+  textAlign(CENTER, CENTER);
+  textSize(min(width, height) * 0.6);
+  fill(0, 0, 0, 60); // 半透明黑
+  noStroke();
+  text(letter, width / 2, height / 2 + 30);
+  pop();
+}
+
+// 換到下一個字母
+function nextLetter() {
+  currentLetterIndex++;
+  if (currentLetterIndex >= letters.length) {
+    currentLetterIndex = 0; // 或遊戲結束
+  }
+  // 設定圓的位置到新字母的第一筆畫起點
+  let letter = letters[currentLetterIndex];
+  let pt = letterStartPoints[letter];
+  circleX = width * pt.x;
+  circleY = height * pt.y;
+  trails = []; // 清空筆跡
+}
+
 function preload() {
   // Initialize HandPose model with flipped video input
   handPose = ml5.handPose({ flipped: true });
@@ -26,12 +62,14 @@ function gotHands(results) {
 function setup() {
   createCanvas(windowWidth, windowHeight); // 畫布全螢幕
   video = createCapture(VIDEO, { flipped: true });
-  video.size( min(windowWidth, windowHeight) * 0.5, min(windowWidth, windowHeight) * 0.5 ); // 設定鏡頭大小為視窗50%，1:1
+  video.size(min(windowWidth, windowHeight) * 0.7, min(windowWidth, windowHeight) * 0.7); // 鏡頭畫面大一點
   video.hide();
 
-  // 圓的初始位置設置在視窗中間
-  circleX = width / 2;
-  circleY = height / 2;
+  // 設定第一個字母的起點
+  let letter = letters[currentLetterIndex];
+  let pt = letterStartPoints[letter];
+  circleX = width * pt.x;
+  circleY = height * pt.y;
 
   // Start detecting hands
   handPose.detectStart(video, gotHands);
@@ -40,13 +78,22 @@ function setup() {
 function draw() {
   background('#edf6f9'); // 設定背景顏色
 
-  // 計算鏡頭畫面顯示位置與大小
-  let camSize = min(width, height) * 0.5;
+  // 鏡頭畫面比例
+  let camSize = min(width, height) * 0.7;
   let camX = (width - camSize) / 2;
   let camY = (height - camSize) / 2;
 
+  // 畫白底黑邊框
+  stroke(0);
+  strokeWeight(3);
+  fill(255);
+  rect(camX, camY, camSize, camSize, 20);
+
   // 顯示鏡頭畫面（1:1比例，置中）
   image(video, camX, camY, camSize, camSize);
+
+  // 畫半透明字母
+  drawLetter(letters[currentLetterIndex]);
 
   // 畫出所有的軌跡
   for (let trail of trails) {
@@ -66,18 +113,22 @@ function draw() {
 
     for (let hand of hands) {
       if (hand.confidence > 0.1) {
-        // 獲取食指與大拇指的座標
+        // 轉換鏡頭座標到畫布座標
         let indexFinger = hand.keypoints[8];
         let thumb = hand.keypoints[4];
+        let ix = map(indexFinger.x, 0, video.width, camX, camX + camSize);
+        let iy = map(indexFinger.y, 0, video.height, camY, camY + camSize);
+        let tx = map(thumb.x, 0, video.width, camX, camX + camSize);
+        let ty = map(thumb.y, 0, video.height, camY, camY + camSize);
 
         // 檢查食指與大拇指是否同時碰觸圓的邊緣
-        let dIndex = dist(indexFinger.x, indexFinger.y, circleX, circleY);
-        let dThumb = dist(thumb.x, thumb.y, circleX, circleY);
+        let dIndex = dist(ix, iy, circleX, circleY);
+        let dThumb = dist(tx, ty, circleX, circleY);
 
         if (dIndex < circleRadius && dThumb < circleRadius) {
           // 如果兩者同時碰觸到，讓圓跟隨手指移動
-          circleX = (indexFinger.x + thumb.x) / 2;
-          circleY = (indexFinger.y + thumb.y) / 2;
+          circleX = (ix + tx) / 2;
+          circleY = (iy + ty) / 2;
 
           // 設置軌跡顏色
           if (hand.handedness === "Right") {
@@ -102,6 +153,11 @@ function draw() {
   } else {
     // 如果沒有檢測到手，停止畫軌跡
     isDrawing = false;
+  }
+
+  // 檢查是否完成一個字母（例如筆跡長度超過某个值）
+  if (trails.length > 80) { // 你可以根據實際情況調整這個數字
+    nextLetter();
   }
 
   // 畫面上方中央加標題（黑字加陰影）
