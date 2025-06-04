@@ -1,236 +1,197 @@
-// Hand Pose Detection with ml5.js
-// https://thecodingtrain.com/tracks/ml5js-beginners-guide/ml5/hand-pose
-
 let video;
-let handPose;
-let hands = [];
-let pencilX, pencilY; // 鉛筆的初始位置
-let circleRadius = 50; // 鉛筆碰觸判斷半徑
-let isDrawing = false;
-let trailColor;
+let handpose;
+let predictions = [];
+
+let pencilX = 0;
+let pencilY = 0;
 let trails = [];
 
 let letters = ['T', 'K', 'U', 'E', 'T'];
 let currentLetterIndex = 0;
-// 每個字母的第一筆畫起點（以鏡頭區域比例設定）
-const letterStartPoints = {
-  'T': { x: 0.5, y: 0.28 },
-  'K': { x: 0.42, y: 0.22 },
-  'U': { x: 0.42, y: 0.22 },
-  'E': { x: 0.42, y: 0.22 }
-};
-
+let letterFontSize = 120;
 let letterBox = {};
-let letterFontSize = 0;
-let camSize, camX, camY;
-
-function drawLetter(letter) {
-  push();
-  textAlign(CENTER, CENTER);
-  letterFontSize = camSize * 0.6;
-  textSize(letterFontSize);
-  fill(0, 0, 0, 60);
-  noStroke();
-  // 以鏡頭畫面中心為基準
-  let cx = camX + camSize / 2;
-  let cy = camY + camSize / 2 + 30;
-  let bbox = font.textBounds(letter, cx, cy, letterFontSize);
-  letterBox = {
-    x: bbox.x,
-    y: bbox.y,
-    w: bbox.w,
-    h: bbox.h
-  };
-  text(letter, cx, cy);
-  pop();
-}
-
-// 畫鉛筆
-function drawPencil(x, y, angle = 0) {
-  push();
-  translate(x, y);
-  rotate(angle);
-  // 放大鉛筆
-  scale(1.8);
-  // 筆身
-  fill(255, 204, 0);
-  stroke(150, 100, 0);
-  strokeWeight(2);
-  rect(-10, -30, 20, 60, 8);
-  // 筆頭
-  fill(255, 220, 180);
-  triangle(-10, 30, 10, 30, 0, 45);
-  // 筆芯
-  fill(80, 60, 40);
-  triangle(-4, 40, 4, 40, 0, 45);
-  pop();
-}
-
-// 換到下一個字母
-function nextLetter() {
-  currentLetterIndex++;
-  if (currentLetterIndex >= letters.length) {
-    currentLetterIndex = 0;
-  }
-  // 依鏡頭區域設定鉛筆起點
-  let letter = letters[currentLetterIndex];
-  let pt = letterStartPoints[letter];
-  pencilX = camX + camSize * pt.x;
-  pencilY = camY + camSize * pt.y;
-  trails = [];
-}
-
 let font;
+
+let gameStarted = false;
+
 function preload() {
-  // 載入字型以取得 textBounds
   font = loadFont('https://cdnjs.cloudflare.com/ajax/libs/topcoat/0.8.0/font/SourceCodePro-Regular.otf');
-  handPose = ml5.handPose({ flipped: true });
-}
-
-function mousePressed() {
-  console.log(hands);
-}
-
-function gotHands(results) {
-  hands = results;
 }
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   textFont(font);
-  video = createCapture(VIDEO, { flipped: true });
-  video.size(min(windowWidth, windowHeight) * 0.7, min(windowWidth, windowHeight) * 0.7);
+  textAlign(CENTER, CENTER);
+
+  video = createCapture(VIDEO);
+  video.size(width, height);
   video.hide();
 
-  // 鏡頭畫面參數
-  camSize = min(windowWidth, windowHeight) * 0.7;
-  camX = (width - camSize) / 2;
-  camY = (height - camSize) / 2;
+  handpose = ml5.handpose(video, () => {
+    console.log("模型載入完成");
+  });
+  handpose.on("predict", (results) => {
+    predictions = results;
+  });
 
-  // 設定第一個字母的起點
-  let letter = letters[currentLetterIndex];
-  let pt = letterStartPoints[letter];
-  pencilX = camX + camSize * pt.x;
-  pencilY = camY + camSize * pt.y;
+  initLetter();
+}
 
-  handPose.detectStart(video, gotHands);
+function initLetter() {
+  trails = [];
+  pencilX = width / 2;
+  pencilY = height / 2 - 60;
+
+  let bounds = font.textBounds(letters[currentLetterIndex], width / 2, height / 2, letterFontSize);
+  letterBox = bounds;
 }
 
 function draw() {
-  background('#edf6f9');
-
-  // 鏡頭畫面參數（每次draw都要更新，因為resize時會變）
-  camSize = min(width, height) * 0.7;
-  camX = (width - camSize) / 2;
-  camY = (height - camSize) / 2;
-
-  // 標題
-  let title = "淡江大學教育科技系";
-  textSize(40);
-  textAlign(CENTER, TOP);
-  fill(0, 80);
-  text(title, width / 2 + 2, height * 0.04 + 2);
-  fill(0);
-  text(title, width / 2, height * 0.04);
-
-  // 畫白底黑邊框
-  stroke(0);
-  strokeWeight(3);
-  fill(255);
-  rect(camX, camY, camSize, camSize, 20);
+  background(240);
 
   // 顯示鏡頭畫面
-  image(video, camX, camY, camSize, camSize);
+  push();
+  translate(width, 0);
+  scale(-1, 1);
+  image(video, 0, 0, width, height);
+  pop();
 
-  // 畫半透明字母
-  drawLetter(letters[currentLetterIndex]);
+  if (!gameStarted) {
+    drawStartScreen();
+    return;
+  }
 
-  // 畫出所有的軌跡（比字母粗一點）
+  // 提示文字
+  textSize(28);
+  fill(0);
+  text("請寫下字母：" + letters.join(', '), width / 2, 40);
+
+  // 畫字母
+  fill(0, 50);
+  textSize(letterFontSize);
+  text(letters[currentLetterIndex], width / 2, height / 2);
+
+  // 畫鉛筆軌跡
   if (trails.length > 1) {
-    strokeWeight(letterFontSize * 0.13);
     stroke(0, 150, 255, 180);
-    for (let i = 1; i < trails.length; i++) {
-      line(trails[i - 1].x, trails[i - 1].y, trails[i].x, trails[i].y);
+    strokeWeight(20);
+    noFill();
+    beginShape();
+    for (let pt of trails) {
+      vertex(pt.x, pt.y);
     }
+    endShape();
   }
 
-  // 畫鉛筆（朝向移動方向）
-  let angle = 0;
-  if (trails.length > 1) {
-    let prev = trails[trails.length - 2];
-    let curr = trails[trails.length - 1];
-    angle = atan2(curr.y - prev.y, curr.x - prev.x);
-  }
-  drawPencil(pencilX, pencilY, angle);
+  // 畫鉛筆
+  fill(255, 200, 0);
+  stroke(100);
+  strokeWeight(2);
+  ellipse(pencilX, pencilY, 30);
 
-  // 手勢偵測與鉛筆移動
-  if (hands.length > 0) {
-    let isHandTouching = false;
-    for (let hand of hands) {
-      if (hand.confidence > 0.1) {
-        let indexFinger = hand.keypoints[8];
-        let thumb = hand.keypoints[4];
-        let ix = map(indexFinger.x, 0, video.width, camX, camX + camSize);
-        let iy = map(indexFinger.y, 0, video.height, camY, camY + camSize);
-        let tx = map(thumb.x, 0, video.width, camX, camX + camSize);
-        let ty = map(thumb.y, 0, video.height, camY, camY + camSize);
+  // 手部偵測與鉛筆控制
+  if (predictions.length > 0) {
+    let hand = predictions[0];
+    let index = hand.annotations.indexFinger[3];
+    let ix = width - index[0];
+    let iy = index[1];
 
-        let dIndex = dist(ix, iy, pencilX, pencilY);
-        let dThumb = dist(tx, ty, pencilX, pencilY);
+    fill(255, 0, 0);
+    noStroke();
+    ellipse(ix, iy, 15); // 手指點
 
-        if (dIndex < circleRadius && dThumb < circleRadius) {
-          let newX = (ix + tx) / 2;
-          let newY = (iy + ty) / 2;
-          // 限制只能在字母邊框內
-          if (
-            newX > letterBox.x &&
-            newX < letterBox.x + letterBox.w &&
-            newY > letterBox.y &&
-            newY < letterBox.y + letterBox.h
-          ) {
-            pencilX = newX;
-            pencilY = newY;
+    let d = dist(ix, iy, pencilX, pencilY);
+    if (d < 50) {
+      pencilX = ix;
+      pencilY = iy;
 
-            // 設置軌跡顏色
-            if (hand.handedness === "Right") {
-              trailColor = color(255, 0, 0);
-            } else if (hand.handedness === "Left") {
-              trailColor = color(0, 255, 0);
-            } else {
-              trailColor = color(0, 150, 255);
-            }
-
-            isDrawing = true;
-            isHandTouching = true;
-
-            // 只記錄在字母框內的筆跡
-            trails.push({ x: pencilX, y: pencilY, color: trailColor });
-          }
-        }
+      if (
+        pencilX > letterBox.x &&
+        pencilX < letterBox.x + letterBox.w &&
+        pencilY > letterBox.y &&
+        pencilY < letterBox.y + letterBox.h
+      ) {
+        trails.push({ x: pencilX, y: pencilY });
       }
     }
-    if (!isHandTouching) isDrawing = false;
-  } else {
-    isDrawing = false;
   }
 
-  // 判斷是否填滿字母（簡單判斷：筆跡點覆蓋率超過某比例）
+  // 檢查是否填滿
   if (trails.length > 10) {
     let coverCount = 0;
-    let totalTest = 100;
-    for (let i = 0; i < totalTest; i++) {
-      let tx = letterBox.x + (letterBox.w * Math.random());
-      let ty = letterBox.y + (letterBox.h * Math.random());
-      for (let j = 0; j < trails.length; j++) {
-        let d = dist(tx, ty, trails[j].x, trails[j].y);
-        if (d < letterFontSize * 0.07) {
+    let testPoints = 100;
+    for (let i = 0; i < testPoints; i++) {
+      let tx = letterBox.x + random(letterBox.w);
+      let ty = letterBox.y + random(letterBox.h);
+      for (let pt of trails) {
+        if (dist(tx, ty, pt.x, pt.y) < 20) {
           coverCount++;
           break;
         }
       }
     }
-    if (coverCount / totalTest > 0.55) {
-      nextLetter();
+
+    if (coverCount / testPoints > 0.5) {
+      currentLetterIndex++;
+      if (currentLetterIndex >= letters.length) {
+        noLoop();
+        background(255);
+        fill(0, 200, 100);
+        textSize(60);
+        text("恭喜通關！", width / 2, height / 2);
+        drawProgress(); // 最後再顯示進度
+        return;
+      } else {
+        initLetter();
+      }
     }
+  }
+
+  drawProgress();
+}
+
+function drawStartScreen() {
+  fill(0, 200);
+  textSize(36);
+  text("請點擊開始遊戲", width / 2, height / 2 - 60);
+
+  fill(0, 120);
+  textSize(24);
+  text("請寫下字母：T, K, U, E, T", width / 2, height / 2 + 20);
+
+  fill(100, 200, 250);
+  noStroke();
+  rectMode(CENTER);
+  rect(width / 2, height / 2 + 100, 160, 50, 10);
+
+  fill(255);
+  textSize(20);
+  text("開始遊戲", width / 2, height / 2 + 100);
+}
+
+function mousePressed() {
+  if (!gameStarted) {
+    gameStarted = true;
+    loop();
+  }
+}
+
+function touchStarted() {
+  if (!gameStarted) {
+    gameStarted = true;
+    loop();
+  }
+}
+
+function drawProgress() {
+  let spacing = 24;
+  let baseX = 20;
+  let baseY = height - 40;
+
+  textSize(28);
+  for (let i = 0; i < letters.length; i++) {
+    let alpha = i < currentLetterIndex ? 255 : 60;
+    fill(0, alpha);
+    text(letters[i], baseX + i * spacing, baseY);
   }
 }
