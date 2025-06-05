@@ -21,7 +21,8 @@ let startTime = 0;
 let countdownNum = 3;
 
 function preload() {
-  handPose = ml5.handPose({ flipped: true });
+  // 不要 flipped: true
+  handPose = ml5.handPose();
 }
 
 function mousePressed() {
@@ -34,11 +35,13 @@ function gotHands(results) {
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
-  video = createCapture(VIDEO, { flipped: true });
+  // 不要 flipped: true
+  video = createCapture(VIDEO);
   video.hide();
   initStars();
   initLevel();
-  handPose.detectStart(video, gotHands);
+  // detectStart 傳 video.elt
+  handPose.detectStart(video.elt, gotHands);
   gameState = "ready";
   startTime = millis();
 }
