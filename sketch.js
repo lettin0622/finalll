@@ -16,30 +16,24 @@ const letterStartPoints = {
   'E': { x: 0.42, y: 0.22 }
 };
 
-function preload() {
-  font = loadFont('https://cdnjs.cloudflare.com/ajax/libs/topcoat/0.8.0/font/SourceCodePro-Regular.otf', 
-    () => {}, 
-    () => { alert('字型載入失敗，請檢查網路或換用本地字型！'); }
-  );
-}
-
+// ...existing code...
 function setup() {
   createCanvas(windowWidth, windowHeight);
-  textFont(font);
+  textFont('sans-serif'); // 使用內建字型
   video = createCapture(VIDEO);
   video.size(min(windowWidth, windowHeight) * 0.7, min(windowWidth, windowHeight) * 0.7);
   video.hide();
-  video.style('transform', 'scale(-1,1)'); // 鏡像
+  video.style('transform', 'scale(-1,1)');
   camSize = min(windowWidth, windowHeight) * 0.7;
   camX = (width - camSize) / 2;
   camY = (height - camSize) / 2;
   handpose = ml5.handpose(video, modelReady);
 
-  // 初始化鉛筆位置（以第一個字母的起點）
   let pt = letterStartPoints[letters[0]];
   pencilX = camX + camSize * pt.x;
   pencilY = camY + camSize * pt.y;
 }
+// ...existing code...
 
 function mousePressed() {
   if (!gameStarted && mouseX > width/2 - 80 && mouseX < width/2 + 80 &&
