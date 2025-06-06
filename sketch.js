@@ -1,295 +1,225 @@
-// Hand Pose Detection with ml5.js
-// https://thecodingtrain.com/tracks/ml5js-beginners-guide/ml5/hand-pose
-
-let video;
-let handPose;
-let hands = [];
-let stars = [];
-let levels = [
-  { letters: ['A', 'B', 'T', 'A', 'D'], target: 'T' },
-  { letters: ['C', 'U', 'E', 'Y', 'K'], target: 'K' },
-  { letters: ['T', 'K', 'U', 'B', 'T'], target: 'U' },
-  { letters: ['U', 'W', 'S', 'K', 'E'], target: 'E' },
-  { letters: ['E', 'L', 'M', 'U', 'T'], target: 'T' }
-];
-let currentLevel = 0;
-let letterObjs = [];
-let grabbedLetter = null;
-let boxX, boxY, boxW, boxH;
-let gameState = "ready";
-let startTime = 0;
-let countdownNum = 3;
+let video, handpose, hands = [];
+let pencilX = 0, pencilY = 0;
+let trails = [];
+let isDrawing = false;
+let currentLetterIndex = 0;
+let gameStarted = false;
+let canvasSize, camX, camY, camSize;
+let font;
+let letters = ['T', 'K', 'U', 'E', 'T'];
+let letterBox = {}, letterFontSize = 0;
+const circleRadius = 50;
+const letterStartPoints = {
+  'T': { x: 0.5, y: 0.28 },
+  'K': { x: 0.42, y: 0.22 },
+  'U': { x: 0.42, y: 0.22 },
+  'E': { x: 0.42, y: 0.22 }
+};
 
 function preload() {
-  // 不要 flipped: true
-  handPose = ml5.handPose();
-}
-
-function mousePressed() {
-  console.log(hands);
-}
-
-function gotHands(results) {
-  hands = results;
+  font = loadFont('https://cdnjs.cloudflare.com/ajax/libs/topcoat/0.8.0/font/SourceCodePro-Regular.otf', 
+    () => {}, 
+    () => { alert('字型載入失敗，請檢查網路或換用本地字型！'); }
+  );
 }
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
-  // 不要 flipped: true
+  textFont(font);
   video = createCapture(VIDEO);
+  video.size(min(windowWidth, windowHeight) * 0.7, min(windowWidth, windowHeight) * 0.7);
   video.hide();
-  initStars();
-  initLevel();
-  // detectStart 傳 video.elt
-  handPose.detectStart(video.elt, gotHands);
-  gameState = "ready";
-  startTime = millis();
+  video.style('transform', 'scale(-1,1)'); // 鏡像
+  camSize = min(windowWidth, windowHeight) * 0.7;
+  camX = (width - camSize) / 2;
+  camY = (height - camSize) / 2;
+  handpose = ml5.handpose(video, modelReady);
+
+  // 初始化鉛筆位置（以第一個字母的起點）
+  let pt = letterStartPoints[letters[0]];
+  pencilX = camX + camSize * pt.x;
+  pencilY = camY + camSize * pt.y;
 }
 
-function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
-  initStars();
-  initLevel();
-}
-
-function initStars() {
-  stars = [];
-  for (let i = 0; i < 150; i++) {
-    stars.push({
-      x: random(width),
-      y: random(height),
-      r: random(0.5, 2.5),
-      alpha: random(80, 255)
-    });
+function mousePressed() {
+  if (!gameStarted && mouseX > width/2 - 80 && mouseX < width/2 + 80 &&
+      mouseY > height/2 - 30 && mouseY < height/2 + 30) {
+    gameStarted = true;
+    // 遊戲開始時重設鉛筆位置
+    let pt = letterStartPoints[letters[currentLetterIndex]];
+    pencilX = camX + camSize * pt.x;
+    pencilY = camY + camSize * pt.y;
+    trails = [];
   }
 }
 
-function initLevel() {
-  // 計算鏡頭畫面區域
-  let baseSize = min(width, height) / 10;
-  let titleY = height * 0.07;
-  let camScale = 0.7;
-  let camW, camH;
-  if (width / height > 16 / 9) {
-    camH = height * camScale;
-    camW = camH * 16 / 9;
-  } else {
-    camW = width * camScale;
-    camH = camW * 9 / 16;
-  }
-  let camTop = titleY + baseSize + 30;
-  let camBottom = height;
-  let availableH = camBottom - camTop;
-  let camY = camTop + (availableH - camH) / 2;
-  let camX = (width - camW) / 2;
+function modelReady() {
+  handpose.on("predict", results => hands = results);
+}
 
-  // 隨機分布字母
-  letterObjs = [];
-  let letters = levels[currentLevel]?.letters || [];
-  for (let i = 0; i < letters.length; i++) {
-    letterObjs.push({
-      char: letters[i],
-      x: random(camX + camW * 0.1, camX + camW * 0.9),
-      y: random(camY + camH * 0.1, camY + camH * 0.9),
-      size: min(width, height) / 8,
-      grabbed: false
-    });
+// 只追蹤左右手食指，並鏡像
+function trackIndexFingers() {
+  let fingers = [];
+  for (let hand of hands) {
+    if (hand.keypoints.length > 8) {
+      // 鏡像 X 座標
+      let ix = map(hand.keypoints[8].x, 0, video.width, camX + camSize, camX);
+      let iy = map(hand.keypoints[8].y, 0, video.height, camY, camY + camSize);
+      fingers.push({ x: ix, y: iy });
+    }
   }
-  // 箱子位置
-  boxW = min(width, height) / 6;
-  boxH = boxW;
-  boxX = width / 2 - boxW / 2;
-  boxY = height * 0.15;
-  grabbedLetter = null;
+  return fingers;
 }
 
 function draw() {
-  drawStars();
-  if (gameState === "ready") return drawReady();
-  if (gameState === "countdown") return drawCountdown();
-  if (gameState === "finished" || currentLevel >= levels.length) return drawFinished();
+  if (!font || !font.font) return; // 避免 font 尚未載入錯誤
+  background('#edf6f9');
+  camSize = min(width, height) * 0.7;
+  camX = (width - camSize) / 2;
+  camY = (height - camSize) / 2;
 
-  drawTitle();
-  let camInfo = drawCamera();
-  drawBox();
-  drawLetters();
-  handleHandGesture();
-}
-
-function drawStars() {
-  background(10, 10, 30);
-  noStroke();
-  for (let s of stars) {
-    fill(255, 255, 255, s.alpha);
-    ellipse(s.x, s.y, s.r, s.r);
-  }
-}
-
-function drawReady() {
-  fill(255);
-  textAlign(CENTER, CENTER);
-  textSize(min(width, height) / 8);
-  text("遊戲即將開始", width / 2, height / 2);
-  if (millis() - startTime > 2000) {
-    gameState = "countdown";
-    countdownNum = 3;
-    startTime = millis();
-  }
-}
-
-function drawCountdown() {
-  let elapsed = millis() - startTime;
-  let count = 3 - floor(elapsed / 1000);
-  if (count !== countdownNum && count > 0) countdownNum = count;
-  fill(255);
-  textAlign(CENTER, CENTER);
-  textSize(min(width, height) / 4);
-  text(countdownNum, width / 2, height / 2);
-  if (elapsed > 3000) {
-    gameState = "playing";
-    startTime = millis();
-  }
-}
-
-function drawFinished() {
-  fill(255);
-  textSize(min(width, height) / 8);
-  textAlign(CENTER, CENTER);
-  text("全部過關！", width / 2, height / 2);
-}
-
-function drawTitle() {
-  let title = "教科抓抓王";
-  textAlign(CENTER, TOP);
-  let baseSize = min(width, height) / 10;
-  textFont('Microsoft JhengHei', 'bold');
-  let titleY = height * 0.07;
-  for (let i = 10; i > 0; i--) {
-    fill(0, 255, 255, 6);
-    stroke(0, 255, 255, 10);
-    strokeWeight(i * 2.5);
-    textSize(baseSize + i * 3);
-    text(title, width / 2, titleY - i);
-  }
-  fill(255);
-  stroke(200);
-  strokeWeight(baseSize / 5);
-  textSize(baseSize);
-  text(title, width / 2, titleY);
-  noStroke();
-  fill(255);
-  text(title, width / 2, titleY);
-}
-
-function drawCamera() {
-  let baseSize = min(width, height) / 10;
-  let titleY = height * 0.07;
-  let camScale = 0.7;
-  let camW, camH;
-  if (width / height > 16 / 9) {
-    camH = height * camScale;
-    camW = camH * 16 / 9;
-  } else {
-    camW = width * camScale;
-    camH = camW * 9 / 16;
-  }
-  let camTop = titleY + baseSize + 30;
-  let camBottom = height;
-  let availableH = camBottom - camTop;
-  let camY = camTop + (availableH - camH) / 2;
-  let camX = (width - camW) / 2;
-
-  // 畫圓角框
-  stroke(255);
-  strokeWeight(6);
-  fill(20, 20, 40, 220);
-  rect(camX, camY, camW, camH, 40);
-
-  // 畫攝影機畫面（鏡像）
-  push();
-  drawingContext.save();
-  drawingContext.beginPath();
-  drawingContext.roundRect(camX, camY, camW, camH, 40);
-  drawingContext.clip();
-  push();
-  translate(camX + camW, camY);
-  scale(-1, 1);
-  image(video, 0, 0, camW, camH);
-  pop();
-  drawingContext.restore();
-  pop();
-
-  return { camX, camY, camW, camH };
-}
-
-function drawBox() {
-  fill(255, 255, 0, 180);
-  stroke(200, 150, 0);
-  strokeWeight(4);
-  rect(boxX, boxY, boxW, boxH, 20);
-  noStroke();
   fill(0);
-  textSize(boxW * 0.6);
-  textAlign(CENTER, CENTER);
-  if (currentLevel < levels.length) {
-    text(levels[currentLevel].target, boxX + boxW / 2, boxY + boxH / 2);
+  textSize(36);
+  textAlign(CENTER, TOP);
+  text("淡江大學教育科技系", width / 2, 20);
+
+  stroke(0);
+  strokeWeight(2);
+  fill(255);
+  rect(camX, camY, camSize, camSize, 20);
+  image(video, camX, camY, camSize, camSize);
+
+  if (!gameStarted) {
+    drawStartButton();
+    return;
   }
-}
 
-function drawLetters() {
-  for (let obj of letterObjs) {
-    fill(obj.grabbed ? 'red' : 'white');
-    stroke(0, 100);
-    strokeWeight(2);
-    textSize(obj.size);
-    textAlign(CENTER, CENTER);
-    text(obj.char, obj.x, obj.y);
+  let currentLetter = letters[currentLetterIndex];
+  drawLetter(currentLetter);
+  drawProgress();
+
+  if (trails.length > 1) {
+    strokeWeight(letterFontSize * 0.13);
+    stroke(0, 150, 255, 180);
+    for (let i = 1; i < trails.length; i++) {
+      line(trails[i-1].x, trails[i-1].y, trails[i].x, trails[i].y);
+    }
   }
-}
 
-function handleHandGesture() {
-  if (hands.length > 0 && currentLevel < levels.length) {
-    let hand = hands[0];
-    if (hand.confidence > 0.1) {
-      let indexFinger = hand.keypoints[8];
-      let thumb = hand.keypoints[4];
-      let mx = (indexFinger.x + thumb.x) / 2;
-      let my = (indexFinger.y + thumb.y) / 2;
-      let pinchDist = dist(indexFinger.x, indexFinger.y, thumb.x, thumb.y);
+  let angle = 0;
+  if (trails.length > 1) {
+    let prev = trails[trails.length - 2];
+    let curr = trails[trails.length - 1];
+    angle = atan2(curr.y - prev.y, curr.x - prev.x);
+  }
+  drawPencil(pencilX, pencilY, angle);
 
-      if (pinchDist < 60) {
-        if (!grabbedLetter) {
-          for (let obj of letterObjs) {
-            let d = dist(mx, my, obj.x, obj.y);
-            if (d < obj.size / 2) {
-              grabbedLetter = obj;
-              obj.grabbed = true;
-              break;
-            }
-          }
-        } else {
-          grabbedLetter.x = mx;
-          grabbedLetter.y = my;
-        }
-      } else {
-        if (grabbedLetter) {
-          if (
-            grabbedLetter.char === levels[currentLevel].target &&
-            grabbedLetter.x > boxX && grabbedLetter.x < boxX + boxW &&
-            grabbedLetter.y > boxY && grabbedLetter.y < boxY + boxH
-          ) {
-            currentLevel++;
-            if (currentLevel >= levels.length) {
-              gameState = "finished";
-            } else {
-              initLevel();
-            }
-          } else {
-            grabbedLetter.grabbed = false;
-          }
-          grabbedLetter = null;
+  // 只追蹤左右手食指
+  let fingers = trackIndexFingers();
+  let isHandTouching = false;
+  for (let finger of fingers) {
+    if (dist(finger.x, finger.y, pencilX, pencilY) < circleRadius) {
+      if (finger.x > letterBox.x && finger.x < letterBox.x + letterBox.w &&
+          finger.y > letterBox.y && finger.y < letterBox.y + letterBox.h) {
+        pencilX = finger.x;
+        pencilY = finger.y;
+        isDrawing = true;
+        trails.push({ x: pencilX, y: pencilY });
+        isHandTouching = true;
+      }
+    }
+  }
+  if (!isHandTouching) isDrawing = false;
+
+  if (trails.length > 10) {
+    let coverCount = 0;
+    for (let i = 0; i < 100; i++) {
+      let tx = letterBox.x + random(letterBox.w);
+      let ty = letterBox.y + random(letterBox.h);
+      for (let j = 0; j < trails.length; j++) {
+        if (dist(tx, ty, trails[j].x, trails[j].y) < letterFontSize * 0.07) {
+          coverCount++;
+          break;
         }
       }
     }
+    if (coverCount / 100 > 0.5) {
+      currentLetterIndex++;
+      if (currentLetterIndex >= letters.length) {
+        textSize(40);
+        fill(0, 200, 0);
+        text("通關成功！", width / 2, height / 2);
+        noLoop();
+        return;
+      }
+      let pt = letterStartPoints[letters[currentLetterIndex]];
+      pencilX = camX + camSize * pt.x;
+      pencilY = camY + camSize * pt.y;
+      trails = [];
+    }
+  }
+
+  fill(50);
+  textSize(24);
+  textAlign(CENTER, BOTTOM);
+  text("請寫出字母 " + currentLetter, width / 2, height - 30);
+}
+
+function drawStartButton() {
+  fill(255);
+  stroke(0);
+  rect(width/2 - 80, height/2 - 30, 160, 60, 10);
+  fill(0);
+  noStroke();
+  textSize(28);
+  textAlign(CENTER, CENTER);
+  text("開始遊戲", width / 2, height / 2);
+}
+
+function drawLetter(letter) {
+  push();
+  textAlign(CENTER, CENTER);
+  letterFontSize = camSize * 0.6;
+  textSize(letterFontSize);
+  fill(0, 0, 0, 40);
+  let cx = camX + camSize / 2;
+  let cy = camY + camSize / 2 + 30;
+  let bbox = font.textBounds(letter, cx, cy, letterFontSize);
+  letterBox = {
+    x: bbox.x,
+    y: bbox.y,
+    w: bbox.w,
+    h: bbox.h
+  };
+  text(letter, cx, cy);
+  pop();
+}
+
+function drawPencil(x, y, angle = 0) {
+  push();
+  translate(x, y);
+  rotate(angle);
+  scale(1.8);
+  fill(255, 204, 0);
+  stroke(150, 100, 0);
+  strokeWeight(2);
+  rect(-10, -30, 20, 60, 8);
+  fill(255, 220, 180);
+  triangle(-10, 30, 10, 30, 0, 45);
+  fill(80, 60, 40);
+  triangle(-4, 40, 4, 40, 0, 45);
+  pop();
+}
+
+function drawProgress() {
+  for (let i = 0; i < letters.length; i++) {
+    if (i < currentLetterIndex) {
+      fill(0);
+    } else {
+      fill(0, 100);
+    }
+    textSize(24);
+    textAlign(LEFT, BOTTOM);
+    text(letters[i], 20 + i * 26, height - 10);
   }
 }
